@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.models import load_model
 import warnings
@@ -22,6 +23,18 @@ model = load_my_model()
 st.title('Instagram Fake Profile Detection')
 st.markdown("""
 This tool helps detect fake Instagram profiles based on various metrics. Upload an Excel file with the necessary data.
+
+### Criteria for Fake Profile Detection:
+- **Profile Picture Availability:** Fake profiles often lack a profile picture.
+- **Username-to-Number Ratio:** Fake accounts may have usernames with many numbers (e.g., john12345).
+- **Full Name Word Count:** Genuine profiles typically have meaningful names; fake ones may not.
+- **Full Name Numeric Ratio:** Fake profiles sometimes include numbers in their full name.
+- **Name Matches Username:** Identical full names and usernames are rare for real users but common in fake accounts.
+- **Biography Length:** Fake profiles often have very short or empty bios.
+- **Privacy Status:** Some fake accounts are private to avoid scrutiny.
+- **Number of Posts:** Fake profiles often have very few or no posts.
+- **Number of Followers:** Fake accounts typically have abnormally low or artificially high follower counts.
+- **Followers-to-Following Ratio:** Fake accounts tend to follow many users but have few followers in return.
 """)
 
 # File uploader widget
@@ -58,21 +71,56 @@ if uploaded_file is not None:
     # Make predictions
     predictions = model.predict(features_scaled)
     data['fake_score'] = predictions.flatten()
-    data['is_fake'] = ((data['fake_score'] > 0.02) & (data['followers_following_ratio'] < 0.2)) | ((data['followersCount'] < 50) & (data['followsCount'] < 50))
-
-    # Handle NaN values before converting to integer
-    data['followersCount'] = data['followersCount'].fillna(0).astype(int)
-    data['followsCount'] = data['followsCount'].fillna(0).astype(int)
     
+    # Assign classification labels
+    data['is_fake'] = np.where(
+        ((data['fake_score'] > 0.02) & (data['followers_following_ratio'] < 0.2)) | 
+        ((data['followersCount'] < 50) & (data['followsCount'] < 50)),
+        'Fake',
+        'Real'
+    )
+    
+    data['warning'] = (
+        ((data['fake_score'] > 0.015) & (data['followers_following_ratio'] < 0.02)) | 
+        (((data['followersCount'] < 100) & (data['followersCount'] > 50)) & (data['followsCount'] < 50))
+    )
+
+    data.loc[data['warning'], 'is_fake'] = 'Warning'
+    
+    # Add new column with emojis
+    data['alert'] = data['is_fake'].apply(lambda x: '🚨' if x == 'Fake' else ('⚠️' if x == 'Warning' else '✅ Real'))
+
+    # Create explanations for why a profile is Fake or Warning
+    def get_reason(row):
+        reasons = []
+        if row['is_fake'] == 'Fake':
+            if row['fake_score'] > 0.02:
+                reasons.append("High fake score")
+            if row['followers_following_ratio'] < 0.2:
+                reasons.append("Low followers/following ratio")
+            if row['followersCount'] < 50 and row['followsCount'] < 50:
+                reasons.append("Very low followers and follows count")
+        elif row['is_fake'] == 'Warning':
+            if row['fake_score'] > 0.015:
+                reasons.append("Moderate fake score")
+            if row['followers_following_ratio'] < 0.02:
+                reasons.append("Extremely low followers/following ratio")
+            if 50 < row['followersCount'] < 100 and row['followsCount'] < 50:
+                reasons.append("Suspicious follower/following pattern")
+        return ", ".join(reasons)
+
+    data['Action'] = data.apply(get_reason, axis=1)
+
     # Selecting profiles to display
-    fake_profiles = data[data['is_fake']][['username', 'url', 'fullName', 'followersCount', 'followsCount', 'is_fake']]
+    fake_profiles = data[data['is_fake'] != 'Real'][['username', 'url', 'fullName', 'followersCount', 'followsCount', 'is_fake', 'alert', 'Action']]
 
     if not fake_profiles.empty:
-        st.success('Analysis complete! Detected Fake Profiles:')
-        # Display fake profiles with the ability to display profile images
-        st.write(fake_profiles.to_html(escape=False, index=False), unsafe_allow_html=True)
+        st.success('Analysis complete! Detected Fake and Warning Profiles:')
+        st.write("### Detected Profiles:")
+        st.dataframe(fake_profiles, use_container_width=True)
     else:
-        st.info('No fake profiles detected.')
+        st.info('No fake or suspicious profiles detected.')
+
 else:
     st.info('Please upload an Excel file to begin analysis.')
 
