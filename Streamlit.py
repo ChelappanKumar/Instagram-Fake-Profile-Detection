@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.express as px
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.models import load_model
 import warnings
@@ -88,7 +89,7 @@ if uploaded_file is not None:
     data.loc[data['warning'], 'is_fake'] = 'Warning'
     
     # Add new column with emojis
-    data['alert'] = data['is_fake'].apply(lambda x: '🚨' if x == 'Fake' else ('⚠️' if x == 'Warning' else '✅ Real'))
+    data['alert'] = data['is_fake'].apply(lambda x: '🚨' if x == 'Fake' else ('⚠️' if x == 'Warning' else '✅'))
 
     # Create explanations for why a profile is Fake or Warning
     def get_reason(row):
@@ -107,6 +108,9 @@ if uploaded_file is not None:
                 reasons.append("Extremely low followers/following ratio")
             if 50 < row['followersCount'] < 100 and row['followsCount'] < 50:
                 reasons.append("Suspicious follower/following pattern")
+        elif row['is_fake'] == 'Real':
+            reasons.append("Profile is Real")
+
         return ", ".join(reasons)
 
     data['Action'] = data.apply(get_reason, axis=1)
@@ -120,10 +124,52 @@ if uploaded_file is not None:
         st.dataframe(fake_profiles, use_container_width=True)
     else:
         st.info('No fake or suspicious profiles detected.')
+        
+    # Interactive Pie Chart Widget
+    is_fake_counts = data['is_fake'].value_counts().reset_index()
+    is_fake_counts.columns = ['is_fake', 'count']
+
+    st.write("### Distribution of Profile Classification (Click to Filter)")
+    fig = px.pie(
+        is_fake_counts,
+        values='count',
+        names='is_fake',
+        title='Fake vs Real Profile Distribution',
+        hole=0.4,
+        color='is_fake',
+        color_discrete_map={'Real': 'green', 'Fake': 'red', 'Warning': 'orange'}
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Dropdown widget to filter profiles based on selection
+    selected_category = st.selectbox("Filter by category:", ['All'] + list(is_fake_counts['is_fake']))
+
+    # Explanation Dictionary
+    explanations = {
+        "Fake": "These profiles have a **high fake score**, **low followers-to-following ratio**, or **very low followers and follows count**.",
+        "Warning": "These profiles show **moderate fake scores**, **suspicious follower/following behavior**, or **low interaction levels**.",
+        "Real": "These profiles exhibit **normal behavior**, such as **realistic follower counts, balanced ratios, and authentic names**."
+    }
+
+    # Display explanation for the selected category
+    if selected_category != 'All':
+        st.info(f"**Why {selected_category}?** {explanations[selected_category]}")
+
+    # Filter data based on selection
+    if selected_category != 'All':
+        filtered_data = data[data['is_fake'] == selected_category]
+    else:
+        filtered_data = data
+
+    # Display filtered profiles
+    st.write(f"### Profiles classified as: {selected_category}")
+    st.dataframe(filtered_data[['username', 'fullName', 'followersCount', 'followsCount', 'is_fake', 'alert', 'Action']], use_container_width=True)
+
 
 else:
     st.info('Please upload an Excel file to begin analysis.')
 
 # Additional features and footer
 st.markdown('---')
-st.markdown('Developed by | © 2025 All rights reserved')
+st.markdown('Developed by Chelappan and Team | © 2025 All rights reserved')
